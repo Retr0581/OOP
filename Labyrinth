@@ -1,9 +1,425 @@
 #include <iostream>
+#include <vector>
+#include <memory>
+#include <cstdlib>
+#include <ctime>
+#include <conio.h> // Для getch() на Windows
 
 using namespace std;
 
-int main()
-{
-    cout << "Hello World!!!!" << endl;
-    return 0;
+// Базовые перечисления для типов клеток лабиринта
+enum class Cell { EMPTY, WALL, PLAYER, ENEMY, EXIT, TREASURE };
+
+// Абстрактный класс (интерфейс) для отрисовки игры
+class IRenderer {
+public:
+    // Виртуальный метод для отрисовки лабиринта и игрока
+    virtual void render(const vector<vector<Cell>>& maze, int px, int py) = 0;
+    virtual ~IRenderer() = default; // Виртуальный деструктор для корректного удаления
+};
+
+// Абстрактный класс (интерфейс) для генерации лабиринта
+class IMazeGenerator {
+public:
+    // Виртуальный метод генерации лабиринта заданных размеров
+    virtual vector<vector<Cell>> generate(int w, int h) = 0;
+    virtual ~IMazeGenerator() = default;
+};
+
+// Абстрактный класс (интерфейс) для обработки пользовательского ввода
+class IInputHandler {
+public:
+    // Виртуальный метод получения ввода от пользователя
+    virtual char getInput() = 0;
+    virtual ~IInputHandler() = default;
+};
+
+// Абстрактный класс (интерфейс) для способностей (заготовка на будущее)
+class IAbility {
+public:
+    virtual void use() = 0;
+    virtual string getName() = 0;
+    virtual ~IAbility() = default;
+};
+
+// Конкретная реализация отрисовщика для консоли
+class ConsoleRenderer : public IRenderer {
+public:
+    // Реализация отрисовки лабиринта в консоли
+    void render(const vector<vector<Cell>>& maze, int px, int py) override {
+        system("cls"); // Очистка консоли (Windows)
+        cout << "ЛАБИРИНТ (w-вверх, s-вниз, a-влево, d-вправо)\n\n";
+
+        // Двойной цикл для прохода по всем клеткам лабиринта
+        for (int i = 0; i < maze.size(); i++) {
+            for (int j = 0; j < maze[i].size(); j++) {
+                if (i == px && j == py) {
+                    cout << "P "; // Отображение игрока
+                } else {
+                    // Отображение символов в зависимости от типа клетки
+                    switch (maze[i][j]) {
+                        case Cell::WALL: cout << "# "; break;     // Стена
+                        case Cell::ENEMY: cout << "E "; break;    // Враг
+                        case Cell::EXIT: cout << "X "; break;     // Выход
+                        case Cell::TREASURE: cout << "T "; break; // Сокровище
+                        default: cout << ". "; break;             // Пустая клетка
+                    }
+                }
+            }
+            cout << endl; // Переход на новую строку после каждой строки лабиринта
+        }
+    }
+};
+
+// Конкретная реализация генератора простого лабиринта
+class SimpleMazeGenerator : public IMazeGenerator {
+public:
+    // Генерация лабиринта с заданной шириной и высотой
+    vector<vector<Cell>> generate(int w, int h) override {
+        // Создание двумерного вектора, инициализированного пустыми клетками
+        vector<vector<Cell>> maze(h, vector<Cell>(w, Cell::EMPTY));
+
+        // Установка стен по границам лабиринта (левая и правая)
+        for (int i = 0; i < h; i++) {
+            maze[i][0] = maze[i][w-1] = Cell::WALL;
+        }
+        // Установка стен по границам лабиринта (верхняя и нижняя)
+        for (int j = 0; j < w; j++) {
+            maze[0][j] = maze[h-1][j] = Cell::WALL;
+        }
+
+        // Генерация случайных внутренних стен
+        srand(time(0)); // Инициализация генератора случайных чисел
+        for (int i = 2; i < h-2; i++) {
+            for (int j = 2; j < w-2; j++) {
+                if (rand() % 4 == 0) maze[i][j] = Cell::WALL; // 25% шанс на стену
+            }
+        }
+
+        // Размещение выхода в правом нижнем углу (рядом со стеной)
+        maze[h-2][w-2] = Cell::EXIT;
+
+        // Размещение трех сокровищ в случайных пустых клетках
+        for (int i = 0; i < 3; i++) {
+            int x, y;
+            do {
+                x = 1 + rand() % (h-2); // Случайная координата X (внутри границ)
+                y = 1 + rand() % (w-2); // Случайная координата Y (внутри границ)
+            } while (maze[x][y] != Cell::EMPTY); // Повторять, пока клетка не пуста
+            maze[x][y] = Cell::TREASURE;
+        }
+
+        // Размещение четырех врагов в случайных пустых клетках
+        for (int i = 0; i < 4; i++) {
+            int x, y;
+            do {
+                x = 1 + rand() % (h-2);
+                y = 1 + rand() % (w-2);
+            } while (maze[x][y] != Cell::EMPTY);
+            maze[x][y] = Cell::ENEMY;
+        }
+
+        return maze; // Возврат сгенерированного лабиринта
+    }
+};
+
+// Конкретная реализация обработчика ввода с клавиатуры
+class KeyboardInputHandler : public IInputHandler {
+public:
+    // Получение символа с клавиатуры без ожидания Enter
+    char getInput() override {
+        return _getch(); // Используем getch() для мгновенного ввода
+    }
+};
+
+// Класс игрока, содержащий характеристики и методы управления
+class Player {
+private:
+    int health = 150;   // Здоровье игрока
+    int armor = 20;     // Броня игрока (уменьшает получаемый урон)
+    int energy = 100;   // Энергия игрока (тратится на способности)
+    int treasures = 0;  // Количество собранных сокровищ
+
+public:
+    // Метод добавления сокровища (улучшает характеристики)
+    void addTreasure() {
+        treasures++;     // Увеличение счетчика сокровищ
+        health += 10;    // Восстановление здоровья
+        energy += 20;    // Восстановление энергии
+
+        // Ограничение максимальных значений
+        if (health > 150) health = 150;
+        if (energy > 100) energy = 100;
+    }
+
+    // Метод получения урона с учетом брони
+    void takeDamage(int damage) {
+        damage -= armor / 4;  // Броня уменьшает урон на 25%
+        if (damage < 5) damage = 5; // Минимальный урон 5
+        health -= damage;     // Вычитание урона из здоровья
+    }
+
+    // Метод восстановления энергии
+    void restore() {
+        energy += 20;
+        if (energy > 100) energy = 100; // Ограничение максимальной энергии
+    }
+
+    // Проверка, жив ли игрок
+    bool isAlive() const { return health > 0; }
+
+    // Отображение текущих характеристик игрока
+    void display() const {
+        cout << "HP: " << health << " | Броня: " << armor
+             << " | Энергия: " << energy << " | Сокровища: " << treasures << endl;
+    }
+
+    // Геттеры для доступа к приватным полям
+    int getHealth() const { return health; }
+    int getEnergy() const { return energy; }
+
+    // Метод траты энергии (используется в бою)
+    void useEnergy(int amount) { energy -= amount; }
+};
+
+// Система боя между игроком и врагом
+class CombatSystem {
+private:
+    Player& player; // Ссылка на игрока для изменения его характеристик
+
+public:
+    // Конструктор принимает ссылку на игрока
+    CombatSystem(Player& p) : player(p) {}
+
+    // Основной метод боя, возвращает true если игрок победил
+    bool fight() {
+        system("cls"); // Очистка экрана
+        cout << "БОЙ!\n";
+
+        int enemyHealth = 80;  // Здоровье врага
+        int enemyDamage = 20;  // Урон врага за ход
+
+        // Цикл боя продолжается пока оба участника живы
+        while (player.isAlive() && enemyHealth > 0) {
+            // Отображение текущего состояния боя
+            cout << "\nВаше HP: " << player.getHealth() << " | Энергия: " << player.getEnergy()
+                 << "\nHP врага: " << enemyHealth << endl;
+            cout << "1. Атаковать (-15 энергии, урон 25)\n";
+            cout << "2. Защищаться (+10 брони на этот ход)\n";
+            cout << "3. Спецприем (-30 энергии, урон 40)\n";
+            cout << "Выберите действие: ";
+
+            char choice = _getch(); // Получение выбора игрока
+            cout << choice << endl;
+
+            // Обработка выбора игрока
+            switch (choice) {
+                case '1': // Обычная атака
+                    if (player.getEnergy() >= 15) {
+                        enemyHealth -= 25;
+                        player.useEnergy(15);
+                        cout << "Вы атаковали! Урон 25\n";
+                    } else {
+                        cout << "Недостаточно энергии!\n";
+                    }
+                    break;
+                case '2': // Защита (в текущей реализации только сообщение)
+                    cout << "Вы защитились!\n";
+                    break;
+                case '3': // Специальная атака
+                    if (player.getEnergy() >= 30) {
+                        enemyHealth -= 40;
+                        player.useEnergy(30);
+                        cout << "Спецприем! Урон 40\n";
+                    } else {
+                        cout << "Недостаточно энергии!\n";
+                    }
+                    break;
+                default: // Некорректный ввод
+                    cout << "Неверный выбор!\n";
+                    break;
+            }
+
+            // Ход врага (если он еще жив)
+            if (enemyHealth > 0) {
+                player.takeDamage(enemyDamage);
+                cout << "Враг атаковал! Урон " << enemyDamage << endl;
+            }
+        }
+
+        // Определение результата боя
+        if (player.isAlive()) {
+            cout << "\nВраг повержен! Вы победили!\n";
+            player.restore(); // Восстановление энергии после победы
+            system("pause"); // Ожидание нажатия клавиши
+            return true;     // Игрок победил
+        } else {
+            cout << "\nВы проиграли бой!\n";
+            system("pause");
+            return false;    // Игрок проиграл
+        }
+    }
+};
+
+// Абстрактная фабрика для создания компонентов игры
+class IGameFactory {
+public:
+    virtual unique_ptr<IRenderer> createRenderer() = 0;
+    virtual unique_ptr<IMazeGenerator> createMazeGenerator() = 0;
+    virtual unique_ptr<IInputHandler> createInputHandler() = 0;
+    virtual ~IGameFactory() = default;
+};
+
+// Конкретная фабрика для консольной версии игры
+class ConsoleGameFactory : public IGameFactory {
+public:
+    // Создание отрисовщика для консоли
+    unique_ptr<IRenderer> createRenderer() override {
+        return make_unique<ConsoleRenderer>();
+    }
+
+    // Создание генератора лабиринта
+    unique_ptr<IMazeGenerator> createMazeGenerator() override {
+        return make_unique<SimpleMazeGenerator>();
+    }
+
+    // Создание обработчика ввода с клавиатуры
+    unique_ptr<IInputHandler> createInputHandler() override {
+        return make_unique<KeyboardInputHandler>();
+    }
+};
+
+// Основной класс игры, управляющий игровым процессом
+class MazeGame {
+private:
+    vector<vector<Cell>> maze;          // Двумерный вектор лабиринта
+    unique_ptr<IRenderer> renderer;     // Указатель на отрисовщик
+    unique_ptr<IInputHandler> inputHandler; // Указатель на обработчик ввода
+    Player player;                      // Объект игрока
+    int playerX, playerY;               // Координаты игрока в лабиринте
+    bool gameRunning;                   // Флаг выполнения игрового цикла
+
+public:
+    // Конструктор принимает фабрику для создания компонентов
+    MazeGame(unique_ptr<IGameFactory> factory)
+        : renderer(factory->createRenderer())
+        , inputHandler(factory->createInputHandler())
+        , gameRunning(true) {
+
+        // Генерация лабиринта с помощью фабрики
+        auto generator = factory->createMazeGenerator();
+        maze = generator->generate(15, 10); // Лабиринт 10x15
+
+        // Начальная позиция игрока (левый верхний угол)
+        playerX = 1;
+        playerY = 1;
+    }
+
+    // Основной метод запуска игры
+    void run() {
+        // Главный игровой цикл
+        while (gameRunning && player.isAlive()) {
+            // Отрисовка текущего состояния игры
+            renderer->render(maze, playerX, playerY);
+            player.display(); // Показать характеристики игрока
+            cout << "\nЛегенда: P-Вы, #-Стена, E-Враг, T-Сокровище, X-Выход\n";
+
+            // Получение ввода от игрока
+            char input = inputHandler->getInput();
+            processInput(input); // Обработка ввода (перемещение)
+            checkCurrentCell();  // Проверка клетки, на которую перешел игрок
+        }
+
+        // Завершение игры (победа или поражение)
+        system("cls");
+        if (player.isAlive()) {
+            cout << "ПОЗДРАВЛЯЕМ! ВЫ НАШЛИ ВЫХОД!\n";
+        } else {
+            cout << "ИГРА ОКОНЧЕНА. ВЫ ПРОИГРАЛИ.\n";
+        }
+        cout << "Итоговая статистика:\n";
+        player.display(); // Показать финальные характеристики
+        system("pause"); // Ожидание нажатия клавиши перед выходом
+    }
+
+private:
+    // Обработка пользовательского ввода (перемещение игрока)
+    void processInput(char input) {
+        int newX = playerX; // Новая координата X
+        int newY = playerY; // Новая координата Y
+
+        // Изменение координат в зависимости от ввода
+        switch (input) {
+            case 'w': newX--; break; // Вверх
+            case 's': newX++; break; // Вниз
+            case 'a': newY--; break; // Влево
+            case 'd': newY++; break; // Вправо
+        }
+
+        // Проверка, можно ли перейти на новую клетку (не стена)
+        if (maze[newX][newY] != Cell::WALL) {
+            playerX = newX;
+            playerY = newY;
+        }
+    }
+
+    // Проверка типа клетки, на которой находится игрок
+    void checkCurrentCell() {
+        Cell& cell = maze[playerX][playerY]; // Ссылка на текущую клетку
+
+        switch (cell) {
+            case Cell::ENEMY: {
+                // Встреча с врагом - начало боя
+                cout << "\nВстречен враг! Нажмите любую клавишу для боя...\n";
+                _getch(); // Ожидание нажатия клавиши
+
+                CombatSystem combat(player); // Создание системы боя
+                if (combat.fight()) {
+                    cell = Cell::EMPTY; // Убираем врага после победы
+                } else {
+                    gameRunning = false; // Завершаем игру при поражении
+                }
+                break;
+            }
+
+            case Cell::TREASURE: {
+                // Найдено сокровище
+                cout << "\nНайдено сокровище! +10 HP, +20 энергии\n";
+                player.addTreasure(); // Улучшение характеристик игрока
+                cell = Cell::EMPTY;   // Убираем сокровище с карты
+                system("pause");      // Пауза для чтения сообщения
+                break;
+            }
+
+            case Cell::EXIT:
+                // Игрок дошел до выхода
+                gameRunning = false; // Завершение игры (победа)
+                break;
+
+            default:
+                // Для других типов клеток ничего не делаем
+                break;
+        }
+    }
+};
+
+// Главная функция - точка входа в программу
+int main() {
+    setlocale(LC_ALL, ""); // Установка локали для корректного отображения кириллицы
+
+    try {
+        // Создание фабрики консольной игры
+        auto factory = make_unique<ConsoleGameFactory>();
+
+        // Создание и запуск игры
+        MazeGame game(move(factory));
+        game.run();
+
+    } catch (const exception& e) {
+        // Обработка исключений (если возникнут)
+        cout << "Ошибка: " << e.what() << endl;
+    }
+
+    cout << "\nСпасибо за игру!\n";
+    return 0; // Завершение программы
 }
