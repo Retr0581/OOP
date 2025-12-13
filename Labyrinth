@@ -3,7 +3,7 @@
 #include <memory>
 #include <cstdlib>
 #include <ctime>
-#include <conio.h> // Для getch() на Windows
+#include <conio.h>
 
 using namespace std;
 
@@ -32,14 +32,6 @@ public:
     // Виртуальный метод получения ввода от пользователя
     virtual char getInput() = 0;
     virtual ~IInputHandler() = default;
-};
-
-// Абстрактный класс (интерфейс) для способностей (заготовка на будущее)
-class IAbility {
-public:
-    virtual void use() = 0;
-    virtual string getName() = 0;
-    virtual ~IAbility() = default;
 };
 
 // Конкретная реализация отрисовщика для консоли
@@ -405,7 +397,7 @@ private:
 
 // Главная функция - точка входа в программу
 int main() {
-    setlocale(LC_ALL, ""); // Установка локали для корректного отображения кириллицы
+    setlocale(LC_ALL, "");
 
     try {
         // Создание фабрики консольной игры
@@ -421,5 +413,5 @@ int main() {
     }
 
     cout << "\nСпасибо за игру!\n";
-    return 0; // Завершение программы
+    return 0;
 }
